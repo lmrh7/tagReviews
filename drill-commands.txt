@@ -1,0 +1,192 @@
+-- Go to the directory
+D:
+cd D:\Yelp\apache-drill\bin
+-- Start apache-drill
+sqlline.bat -u "jdbc:drill:zk=local"
+-- Get one review
+select * from dfs.`D:\Yelp\yelp_academic_dataset_review.json` limit 1;
+-- Select a business record
+select * from
+    dfs.`D:\Yelp\yelp_academic_dataset_business.json`
+    limit 1;
+-- Total reviews
+select sum(review_count) as totalreviews
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json`;
+-- Top states and cities in total number of reviews
+select state, city, count(*) totalreviews 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` 
+group by state, city order by count(*) desc limit 10;
+-- Average number of reviews per business star rating
+select stars,trunc(avg(review_count)) reviewsavg 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json`
+group by stars order by stars desc;
+--Top businesses with high review counts (> 1000)
+select business_id, name, state, city, `review_count` from
+dfs.`D:\Yelp\yelp_academic_dataset_business.json`
+where review_count > 1000 order by `review_count` desc limit 10;
+-- Saturday open and close times for a few businesses
+select b.name, b.hours.Saturday.`open`,
+b.hours.Saturday.`close`  
+from
+dfs.`D:\Yelp\yelp_academic_dataset_business.json`
+b limit 10;
+-- Change Drill to work in all text mode (so we can take a look at all of the data).
+alter system set `store.json.all_text_mode` = true;
+-- Number of restaurants in the data set
+select count(*) as TotalRestaurants from dfs.`D:\Yelp\yelp_academic_dataset_business.json` where true=repeated_contains(categories,'Restaurants');
+-- Top restaurants in number of reviews
+select name,state,city,`review_count` from dfs.`D:\Yelp\yelp_academic_dataset_business.json` where true=repeated_contains(categories,'Restaurants') order by `review_count` desc limit 10;
+-- Top restaurants in number of listed categories
+select name,repeated_count(categories) as categorycount, categories from dfs.`D:\Yelp\yelp_academic_dataset_business.json` where true=repeated_contains(categories,'Restaurants') order by repeated_count(categories) desc limit 10;
+-- Top first categories in number of review counts
+select categories[0], count(categories[0]) as categorycount 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` 
+group by categories[0] 
+order by count(categories[0]) desc limit 10;
+-- Get the businesses with the higher cool ratings > 2000
+Select b.name 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b 
+where b.business_id in (SELECT r.business_id 
+FROM dfs.`D:\Yelp\yelp_academic_dataset_review.json` r
+GROUP BY r.business_id having sum(r.votes.cool) > 2000 
+order by sum(r.votes.cool)  desc);
+-- Create a view with the combined business and reviews data sets
+-- If you want to persist the data physically instead of in a logical view, you can use CREATE TABLE AS syntax.
+create or replace view dfs.tmp.businessreviews as 
+Select b.name,b.stars,b.state,b.city,r.votes.funny,r.votes.useful,r.votes.cool, r.`date` 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b, dfs.`D:\Yelp\yelp_academic_dataset_review.json` r 
+where r.business_id=b.business_id
+-- Important datasets
+-- D:\Yelp\yelp_academic_dataset_business.json
+-- D:\Yelp\photo_id_to_business_id.json
+-- D:\Yelp\yelp_academic_dataset_review.json
+-- Select a photo record
+select * from
+dfs.`D:\Yelp\photo_id_to_business_id.json`
+limit 10;
+-- Number of photos with label 'none'
+select count(*) as TotalUnlabeled
+from dfs.`D:\Yelp\photo_id_to_business_id.json` b
+where b.label like '%none%';
+-- Count the number of restaurants
+select count(*) as TotalRestaurants 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` 
+where true=repeated_contains(categories,'Restaurants');
+-- Print the name of the first ten businesses that have pictures without labels
+Select b.name 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b 
+where true=repeated_contains(b.categories,'Restaurants')
+AND b.business_id in (SELECT r.business_id 
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r
+where r.label like '%none%') limit 10;
+-- Print the first ten photo IDs
+Select r.photo_id 
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.label like '%none%'
+AND r.business_id in (SELECT b.business_id 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b
+where true=repeated_contains(b.categories,'Restaurants'))
+limit 10;
+-- Get number of photos of restaurants
+Select count(*)
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.business_id in (SELECT b.business_id 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b
+where true=repeated_contains(b.categories,'Restaurants'));
+-- Get number of photos of restaurants without captions
+Select count(*)
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.caption is NULL
+AND r.business_id in (SELECT b.business_id 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b
+where true=repeated_contains(b.categories,'Restaurants'));
+-- Get number of unlabeled photos of restaurants
+Select count(*)
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.label like '%none%'
+AND r.business_id in (SELECT b.business_id 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b
+where true=repeated_contains(b.categories,'Restaurants'));
+
+--Write TABLE
+"tmp": {
+      "location": "D:\Yelp\temp",
+      "writable": true,
+       }
+alter session set `store.format`='json';
+use dfs.tmp;
+-- Create table
+create table unlabeled_restaurants as
+Select r.photo_id, r.business_id, r.caption, r.label 
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.label like '%none%'
+AND r.business_id in (SELECT b.business_id 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b
+where true=repeated_contains(b.categories,'Restaurants'));
+
+select count(*) from dfs.`D:\Yelp\unlabeled_photos_restaurants.json` where caption IS NULL;
+select photo_id, caption from dfs.`D:\Yelp\unlabeled_photos_restaurants.json` where caption IS NULL limit 20;
+
+-- Create table for restaurants
+alter session set `store.format`='csv';
+use dfs.tmp;
+create table restaurant_business as
+SELECT *
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b
+where true=repeated_contains(b.categories,'Restaurants');
+
+create table restaurant_photos as
+Select r.photo_id, r.business_id, r.caption, r.label 
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.business_id in (SELECT b.business_id 
+from dfs.`D:\Yelp\datasets\restaurant_business.json` b);
+
+
+create table restaurant_reviews as
+Select columns[1]
+FROM dfs.`D:\Yelp\yelp_academic_dataset_review.json` r
+where columns[1] in (SELECT b.business_id 
+from dfs.`D:\Yelp\datasets\restaurant_business.json` b);
+
+create table restaurant_photos_unlabeled as
+Select r.photo_id, r.business_id, r.caption, r.label 
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.label like '%none%'
+AND r.business_id in (SELECT b.business_id 
+from dfs.`D:\Yelp\yelp_academic_dataset_business.json` b
+where true=repeated_contains(b.categories,'Restaurants'));
+{
+    'type': 'review',
+    'business_id': (encrypted business id),
+    'user_id': (encrypted user id),
+    'stars': (star rating, rounded to half-stars),
+    'text': (review text),
+    'date': (date, formatted like '2012-03-14'),
+    'votes': {(vote type): (count)},
+}
+Select caption from dfs.`D:\Yelp\datasets\restaurant_photos.json` limit 20;
+
+create table mon_ami_gabi_reviews as
+Select business_id, review_id, text
+FROM dfs.`D:\Yelp\yelp_academic_dataset_review.json` 
+where business_id like '%4bEjOyTaDG24SY5TxsaUNQ%';
+
+create table mon_ami_gabi_photos as
+Select r.photo_id, r.business_id, r.caption, r.label 
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.caption is not NULL limit 10;
+!quit
+
+create table mon_ami_gabi_photos as
+Select r.photo_id, r.business_id, r.caption, r.label 
+FROM dfs.`D:\Yelp\photo_id_to_business_id.json` r 
+where r.caption is not NULL and r.caption <> '' 
+and business_id like '%4bEjOyTaDG24SY5TxsaUNQ%';
+
+Select count(*) 
+FROM dfs.`D:\Yelp\datasets\restaurant_photos.json` r 
+where r.caption is not NULL and r.caption <> '' limit 10;
+
+Select count(*) 
+FROM dfs.`D:\Yelp\datasets\restaurant_photos.json` r 
+where r.label is not NULL and r.label <> '' and r.label like '%none%' limit 10;
